@@ -8,7 +8,7 @@ from typing import Optional, List
 class EDA:
     """Classe para Exploratory Data Analysis (EDA) completa de datasets."""
     
-    def __init__(self, df: pd.DataFrame, figsize: tuple = (12, 6)):
+    def __init__(self, df: pd.DataFrame, figsize: tuple = (12, 6),colunas: Optional[List[str]] = None):
         """
         Inicializa a classe EDA.
         
@@ -23,6 +23,49 @@ class EDA:
         self.figsize = figsize
         sns.set_style("whitegrid")
         plt.rcParams['figure.figsize'] = figsize
+
+    def _obter_colunas_numericas(self, df: Optional[pd.DataFrame] = None, colunas: Optional[List[str]] = None) -> List[str]:
+        """Retorna colunas numéricas usando pandas.is_numeric_dtype (suporta dtypes 'extension').
+
+        Nota: não filtra colunas que sejam todas NaN — as funções de plotagem já fazem .dropna() antes de desenhar.
+        """
+        if df is None:
+            df = self.df
+
+        from pandas.api.types import is_numeric_dtype
+
+        numeric_cols = [c for c in df.columns if is_numeric_dtype(df[c].dtype)]
+
+        if colunas is not None:
+            return [col for col in colunas if col in numeric_cols]
+
+        return numeric_cols
+
+    def _obter_colunas_categoricas(self, df: Optional[pd.DataFrame] = None, colunas: Optional[List[str]] = None,
+                                   low_cardinality_threshold: Optional[int] = None) -> List[str]:
+        """Retorna colunas categóricas (category, object, string, bool).
+        Se low_cardinality_threshold for fornecido, considera colunas numéricas com poucas categorias como categóricas.
+        """
+        if df is None:
+            df = self.df
+
+        from pandas.api.types import (is_categorical_dtype, is_object_dtype,
+                                      is_string_dtype, is_bool_dtype, is_numeric_dtype)
+
+        cat_cols = []
+        for col in df.columns:
+            dtype = df[col].dtype
+            if (is_categorical_dtype(dtype) or is_object_dtype(dtype)
+                    or is_string_dtype(dtype) or is_bool_dtype(dtype)):
+                cat_cols.append(col)
+            elif low_cardinality_threshold is not None and is_numeric_dtype(dtype):
+                if df[col].nunique(dropna=True) <= low_cardinality_threshold:
+                    cat_cols.append(col)
+
+        if colunas is not None:
+            return [col for col in colunas if col in cat_cols]
+
+        return cat_cols
     
     def verificar_nulos(self) -> pd.DataFrame:
         """Verifica e exibe informações sobre valores nulos."""
@@ -68,7 +111,8 @@ class EDA:
         else:
             df = self.df
 
-        df_numericos = df.select_dtypes(include=[np.number])
+        col_numericas = self._obter_colunas_numericas(df)
+        df_numericos = df[col_numericas]
         if df_numericos.empty:
             print("Nenhuma coluna numérica encontrada para estatísticas descritivas!")
             return pd.DataFrame()
@@ -87,9 +131,9 @@ class EDA:
             Colunas numéricas para análise. Se None, seleciona automaticamente.
         """
         if colunas is not None:
-            colunas = [col for col in colunas if col in self.df.columns and np.issubdtype(self.df[col].dtype, np.number)]
+            colunas = self._obter_colunas_numericas(colunas=colunas)
         else:
-            colunas = self.df.select_dtypes(include=[np.number]).columns.tolist()
+            colunas = self._obter_colunas_numericas()
         
         n_cols = len(colunas)
         if n_cols == 0:
@@ -99,11 +143,16 @@ class EDA:
         fig, axes = plt.subplots(1, min(n_cols, 4), figsize=(15, 5))
         if n_cols == 1:
             axes = [axes]
-        
-        for idx, col in enumerate(colunas[:4]):
-            sns.boxplot(data=self.df, y=col, ax=axes[idx], palette='Set2')
+
+        for idx, col in enumerate(colunas[:-1]):
+            series = self.df[col].dropna()
+            if series.empty:
+                axes[idx].text(0.5, 0.5, 'Sem valores não-nulos', ha='center', va='center')
+                axes[idx].set_title(f'Boxplot - {col} (sem dados)')
+                continue
+            sns.boxplot(y=series, ax=axes[idx], palette='Set2')
             axes[idx].set_title(f'Boxplot - {col}')
-        
+
         plt.tight_layout()
         plt.show()
     
@@ -117,9 +166,9 @@ class EDA:
             Colunas para análise. Se None, seleciona colunas numéricas.
         """
         if colunas is not None:
-            colunas = [col for col in colunas if col in self.df.columns and np.issubdtype(self.df[col].dtype, np.number)]
+            colunas = self._obter_colunas_numericas(colunas=colunas)
         else:
-            colunas = self.df.select_dtypes(include=[np.number]).columns.tolist()
+            colunas = self._obter_colunas_numericas()
         
         n_cols = len(colunas)
         if n_cols == 0:
@@ -128,15 +177,20 @@ class EDA:
         
         fig, axes = plt.subplots((n_cols + 2) // 3, 3, figsize=(15, 10))
         axes = axes.flatten() if n_cols > 1 else [axes]
-        
+
         for idx, col in enumerate(colunas):
+            series = self.df[col].dropna()
+            if series.empty:
+                axes[idx].text(0.5, 0.5, 'Sem valores não-nulos', ha='center', va='center')
+                axes[idx].set_title(f'Distribuição - {col} (sem dados)')
+                continue
             # Não passar `palette` quando não há `hue` para evitar UserWarning
-            sns.histplot(data=self.df, x=col, kde=True, ax=axes[idx])
+            sns.histplot(x=series, kde=True, ax=axes[idx])
             axes[idx].set_title(f'Distribuição - {col}')
-        
+
         for idx in range(len(colunas), len(axes)):
             fig.delaxes(axes[idx])
-        
+
         plt.tight_layout()
         plt.show()
     
@@ -157,9 +211,9 @@ class EDA:
         
         if colunas is not None:
             colunas = [col for col in colunas if col in self.df.columns]
-            df_numericos = self.df[colunas].select_dtypes(include=[np.number])
+            df_numericos = self.df[self._obter_colunas_numericas(self.df, colunas)]
         else:
-            df_numericos = self.df.select_dtypes(include=[np.number])
+            df_numericos = self.df[self._obter_colunas_numericas()]
 
         if df_numericos.empty:
             print("Nenhuma coluna numérica encontrada para correlação!")
@@ -193,7 +247,7 @@ class EDA:
         print(f"TOP {top_n} CORRELAÇÕES COM '{target}'")
         print("="*60)
         
-        df_numericos = self.df.select_dtypes(include=[np.number])
+        df_numericos = self.df[self._obter_colunas_numericas()]
         correlacao = df_numericos.corr()[target].sort_values(ascending=False)
         print(correlacao.head(top_n))
         
@@ -222,7 +276,7 @@ class EDA:
         max_categorias : int
             Limite de categorias para visualização
         """
-        colunas_cat = self.df.select_dtypes(include=['object']).columns.tolist()
+        colunas_cat = self._obter_colunas_categoricas()
         
         if not colunas_cat:
             print("Nenhuma coluna categórica encontrada!")
@@ -253,9 +307,9 @@ class EDA:
             Colunas para análise
         """
         if colunas is not None:
-            colunas = [col for col in colunas if col in self.df.columns and np.issubdtype(self.df[col].dtype, np.number)]
+            colunas = self._obter_colunas_numericas(colunas=colunas)
         else:
-            colunas = self.df.select_dtypes(include=[np.number]).columns.tolist()
+            colunas = self._obter_colunas_numericas()
         
         if not colunas:
             print("Nenhuma coluna numérica encontrada para detecção de outliers!")
