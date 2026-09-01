@@ -1,4 +1,4 @@
-"""Treinamento de uma rede neural MLP do Scikit-Learn para churn binário."""
+"""Treinamento de Random Forest para churn binário."""
 
 from __future__ import annotations
 
@@ -9,11 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import joblib
-import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
-from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 from .baseline_training import BaselineTrainer
 from .metrics import calcular_metricas_classificacao
@@ -22,8 +20,8 @@ from .splitting import get_or_create_split_indices
 LOGGER = logging.getLogger(__name__)
 
 
-class MLPTrainer:
-    """Treina um MLPClassifier no mesmo holdout utilizado pelos demais modelos."""
+class RandomForestTrainer:
+    """Treina um ensemble de árvores no holdout compartilhado do projeto."""
 
     def __init__(
         self,
@@ -32,33 +30,26 @@ class MLPTrainer:
         test_size: float = 0.2,
         validation_size: float = 0.2,
         random_seed: int = 42,
-        hidden_layer_sizes: tuple[int, ...] = (128, 64),
-        max_iter: int = 500,
+        n_estimators: int = 300,
     ) -> None:
         self.input_path = Path(input_path)
         self.target = target
         self.test_size = test_size
         self.validation_size = validation_size
         self.random_seed = random_seed
-        self.hidden_layer_sizes = hidden_layer_sizes
-        self.max_iter = max_iter
+        self.n_estimators = n_estimators
 
     def criar_pipeline(self) -> Pipeline:
         return Pipeline(
             [
                 ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", StandardScaler()),
                 (
                     "classifier",
-                    MLPClassifier(
-                        hidden_layer_sizes=self.hidden_layer_sizes,
-                        activation="relu",
-                        solver="adam",
-                        early_stopping=True,
-                        validation_fraction=self.validation_size,
-                        n_iter_no_change=20,
-                        max_iter=self.max_iter,
+                    RandomForestClassifier(
+                        n_estimators=self.n_estimators,
+                        class_weight="balanced",
                         random_state=self.random_seed,
+                        n_jobs=-1,
                     ),
                 ),
             ]
@@ -66,8 +57,8 @@ class MLPTrainer:
 
     def executar(
         self,
-        output_model: str | Path = "models/mlp_classifier.joblib",
-        output_metrics: str | Path = "results/mlp_classifier_metrics.json",
+        output_model: str | Path = "models/random_forest.joblib",
+        output_metrics: str | Path = "results/random_forest_metrics.json",
     ) -> dict[str, Any]:
         baseline = BaselineTrainer(
             input_path=self.input_path,
@@ -101,7 +92,7 @@ class MLPTrainer:
         metrics_path.write_text(
             json.dumps(
                 {
-                    "model": "MLPClassifier",
+                    "model": "RandomForestClassifier",
                     "parameters": model.named_steps["classifier"].get_params(),
                     "metrics": metrics,
                 },
@@ -111,26 +102,16 @@ class MLPTrainer:
             ),
             encoding="utf-8",
         )
-        LOGGER.info("MLPClassifier salvo em %s; métricas: %s", model_path, metrics)
+        LOGGER.info("Random Forest salvo em %s; métricas: %s", model_path, metrics)
         return {"model": model, "metrics": metrics, "model_path": model_path}
 
 
-def _parse_hidden_layers(value: str) -> tuple[int, ...]:
-    layers = tuple(int(item.strip()) for item in value.split(",") if item.strip())
-    if not layers or any(layer <= 0 for layer in layers):
-        raise argparse.ArgumentTypeError(
-            "Use uma ou mais camadas positivas, por exemplo: 128,64"
-        )
-    return layers
-
-
 def parsear_argumentos() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Treina MLPClassifier para churn")
+    parser = argparse.ArgumentParser(description="Treina Random Forest para churn")
     parser.add_argument("--input", type=Path, default=Path("data/processed/telco_feature_engineered.csv"))
-    parser.add_argument("--output-model", type=Path, default=Path("models/mlp_classifier.joblib"))
-    parser.add_argument("--output-metrics", type=Path, default=Path("results/mlp_classifier_metrics.json"))
-    parser.add_argument("--hidden-layers", type=_parse_hidden_layers, default=(128, 64))
-    parser.add_argument("--max-iter", type=int, default=500)
+    parser.add_argument("--output-model", type=Path, default=Path("models/random_forest.joblib"))
+    parser.add_argument("--output-metrics", type=Path, default=Path("results/random_forest_metrics.json"))
+    parser.add_argument("--n-estimators", type=int, default=300)
     parser.add_argument("--random-seed", type=int, default=42)
     return parser.parse_args()
 
@@ -138,10 +119,9 @@ def parsear_argumentos() -> argparse.Namespace:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parsear_argumentos()
-    MLPTrainer(
+    RandomForestTrainer(
         input_path=args.input,
-        hidden_layer_sizes=args.hidden_layers,
-        max_iter=args.max_iter,
+        n_estimators=args.n_estimators,
         random_seed=args.random_seed,
     ).executar(args.output_model, args.output_metrics)
 
