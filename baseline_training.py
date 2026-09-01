@@ -23,11 +23,11 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from metrics import calcular_metricas_classificacao
+from .metrics import calcular_metricas_classificacao
+from .splitting import get_or_create_split_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -133,13 +133,13 @@ class BaselineTrainer:
         df = self.carregar_dataset(caminho_entrada)
         X, y = self.preparar_features(df)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
+        split = get_or_create_split_indices(
+            y.to_numpy(),
             test_size=self.test_size,
-            stratify=y,
-            random_state=self.random_seed,
+            random_seed=self.random_seed,
         )
+        X_train, y_train = X.iloc[split.train], y.iloc[split.train]
+        X_test, y_test = X.iloc[split.test], y.iloc[split.test]
 
         LOGGER.info('Treinando baselines com %d amostras para treino e %d amostras para teste', X_train.shape[0], X_test.shape[0])
         resultados = self.treinar_baselines(X_train, X_test, y_train, y_test, self.random_seed)

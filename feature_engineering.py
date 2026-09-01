@@ -4,7 +4,7 @@ Este script carrega o conjunto de dados de churn, aplica limpeza e engenharia de
 features, e grava um conjunto preparado pronto para modelagem.
 
 Uso:
-    python src/feature_engineering.py \
+    python -m src.churn.feature_engineering \
         --input Telco_customer_churn.xlsx \
         --output data/processed/telco_feature_engineered.csv
 """
